@@ -1,84 +1,86 @@
-# Entpacken von ElAmigos / ISDone-Inno-Installern (Workflow)
+# Unpacking ElAmigos / ISDone Inno installers (workflow)
 
-Kurzanleitung, um einen passwortgeschützten Inno-Setup-Repack (ISDone.dll +
-FreeArc/unarc + lolz/srep-Codecs) **offline zu entpacken, ohne den Installer
-auszuführen**. Getestet an *Shin Megami Tensei III Nocturne HD — ElAmigos*.
+Short guide to **unpack a password-protected Inno Setup repack (ISDone.dll +
+FreeArc/unarc + lolz/srep codecs) offline, without running the installer**.
+Tested on *Shin Megami Tensei III Nocturne HD — ElAmigos*.
 
-> Scene-Binaries (unarc.dll, cls-*.dll, *.exe-Worker) sind untrusted. Beim
-> ersten Mal in einer Wegwerf-VM mit Snapshot und ohne Netz laufen lassen.
-> Statische Triage dieser Toolchain (13 Binaries, 2026-11-14): keine Netzwerk-
-> Imports/-Strings, kein Registry-Write/Service/Injection; `CreateProcess` =
-> Codec-Worker. Sauber im Rahmen statischer Analyse.
+> Scene binaries (unarc.dll, cls-*.dll, *.exe workers) are untrusted. On the
+> first run, do it in a throwaway VM with a snapshot and no network.
+> Static triage of this toolchain (13 binaries, 2026-11-14): no network
+> imports/strings, no registry writes/service/injection; `CreateProcess` =
+> codec workers. Clean within the limits of static analysis.
 
-## 1. Installer-Passwort holen (falls der Installer selbst verschlüsselt ist)
+## 1. Get the installer password (if the installer itself is encrypted)
 
 ```
 innounp.exe -crack setup.exe
 ```
-Holt das Inno-Passwort aus dem compilierten PascalScript. Alternativ
-`innounp.exe -showpass setup.exe` für Hash/Salt (Offline-Cracking).
+Recovers the Inno password from the compiled PascalScript. Alternatively
+`innounp.exe -showpass setup.exe` for the hash/salt (offline cracking).
 
-## 2. ARC-Passwort(e) aus dem CompiledCode holen
+## 2. Get the ARC password(s) from the compiled code
 
-Die ARC-Passwörter stehen als **Klartext-Literale** im compilierten Code, direkt
-beim `ISArcExtract`-Aufruf. CompiledCode dumpen …
+The ARC passwords sit as **plaintext literals** in the compiled code, right at
+the `ISArcExtract` call. Dump CompiledCode …
 
 ```
 innounp.exe -x -m -b -p"<installer-pw>" setup.exe "embedded\CompiledCode.bin"
 ```
 
-… dann die Passwörter finden — am schnellsten per Strings, oder im IFPS-Disasm
-die `ISArcExtract`-Callsites ansehen:
+… then find the passwords — fastest via strings, or inspect the `ISArcExtract`
+call sites in the IFPS disassembly:
 
 ```
-strings embedded\CompiledCode.bin          # hochentropische PW-Strings
-# bzw. im Disasm nach "ISArcExtract" / loc_* suchen
+strings embedded\CompiledCode.bin          # high-entropy PW strings
+# or search the disassembly for "ISArcExtract" / loc_*
 ```
 
-**Achtung:** Es kann **mehrere** Passwörter für **mehrere Archiv-Sets** geben
-(getrennte `ISArcExtract`-Pfade, teils in `FindFirst/FindNext`-Schleifen).
-Beispiel SMT3HD:
+**Note:** there can be **multiple** passwords for **multiple archive sets**
+(separate `ISArcExtract` paths, sometimes inside `FindFirst/FindNext` loops).
+Example SMT3HD:
 - `elamigos-1.bin`  →  `5yyux2X*jzZWiW3H49eQ9t*c2MK79`
-- weitere Teile     →  `6Hsdr96#vTewJ4ebmrf7XxkLsbHcJ`
+- further parts     →  `6Hsdr96#vTewJ4ebmrf7XxkLsbHcJ`
 
-## 3. Die mitgelieferte Codec-Toolchain extrahieren
+## 3. Extract the bundled codec toolchain
 
 ```
 innounp.exe -x -b -p"<installer-pw>" -dtool setup.exe "{tmp}\*"
 ```
-Liefert u. a. `unarc.dll`, `arc.ini`, `cls.ini`, `cls-lolz*.{dll,exe}`,
-`cls-bpk.dll`, `CLS-srep.dll`, `srep64.exe`, `facompress*.dll`. **Diese
-Original-Dateien benutzen** — Stock-FreeArc/freearc-c kennen den `lolz`-Codec
-nicht.
+Yields, among others, `unarc.dll`, `arc.ini`, `cls.ini`, `cls-lolz*.{dll,exe}`,
+`cls-bpk.dll`, `CLS-srep.dll`, `srep64.exe`, `facompress*.dll`. **Use these
+original files** — stock FreeArc / freearc-c do not know the `lolz` codec.
 
-## 4. Entpacken mit unarcx
+## 4. Extract with unarcx
 
-`unarcx.exe` + die Archive (`elamigos-*.bin`) in den Toolchain-Ordner (`tool\{tmp}\`)
-legen und **aus diesem Ordner** starten — die Codec-Plugins werden per Name aus
-dem CWD geladen. **Als Administrator** ausführen (die lolz/srep-Worker nutzen
-`Global\`-Shared-Memory → braucht Elevation, sonst „Can't create/open mapping!").
+Put `unarcx.exe` + the archives (`elamigos-*.bin`) into the toolchain folder
+(`tool\{tmp}\`) and start it **from that folder** — the codec plugins are loaded
+by name from the CWD. Run it **as Administrator** (the lolz/srep workers use
+`Global\` shared memory → needs elevation, otherwise "Can't create/open ...
+mapping!").
 
 ```
-unarcx.exe <archiv> <outdir> <arc-passwort> [maske ...]
+unarcx.exe <archive> <outdir> <arc-password> [mask ...]
 ```
-Gezielt nur die Dump-relevanten Dateien:
+Only the dump-relevant files:
 ```
 unarcx.exe elamigos-1.bin out "5yyux2X*jzZWiW3H49eQ9t*c2MK79" "*global-metadata.dat" "*GameAssembly.dll" "*il2cpp*"
 ```
 
-### Tuning, falls nötig
-- **Sofort `-1` / general error:** `-cfg`-Argument weglassen (im Source die
-  `AddArg('-cfg'…)`-Zeile) — `arc.ini` wird i. d. R. aus dem CWD auto-geladen.
-- **Crash beim ersten Callback:** im Source `ArcCallback` von `stdcall` auf
-  `cdecl` umstellen (Aufrufkonvention; Default ist `stdcall` laut `unarcdll.h`).
-- **Externe Worker finden Temp nicht:** `AddArg('-w' + workdir)` ergänzen.
+### Tuning, if needed
+- **Immediate `-1` / general error:** drop the `-cfg` argument (the
+  `AddArg('-cfg'…)` line in the source) — `arc.ini` is usually auto-loaded from
+  the CWD.
+- **Crash on the first callback:** in the source switch `ArcCallback` from
+  `stdcall` to `cdecl` (calling convention; the default is `stdcall` per
+  `unarcdll.h`).
+- **External workers can't find temp:** add `AddArg('-w' + workdir)`.
 
-## Wie unarcx funktioniert (RE-Notiz)
+## How unarcx works (RE note)
 
-`unarc.dll` Export ord. 2 = `FreeArcExtract(callback, cmd1, …, NULL)` (`__cdecl`,
-Args wie unarc-CLI, Ende bei NULL/Leerstring). Ein übergebener Callback setzt
-intern das „Verschlüsselung aktiv"-Flag. Bei Bedarf feuert die DLL das Event
-`what="password?"` (`int1`=Puffergröße, `str`=Passwort-Puffer); der Callback
-kopiert das Passwort in `str` und gibt **121 (`'y'`)** zurück. Krypto:
-PBKDF2 (pkcs5) + AES-256/CTR, Prüfung gegen den `:c`-Wert im Methodenstring.
-Kein ISDone, keine Fenster-Handles nötig.
+`unarc.dll` export ord. 2 = `FreeArcExtract(callback, cmd1, …, NULL)` (`__cdecl`,
+args like the unarc CLI, list ends at NULL/empty string). Passing a callback
+sets the internal "encryption enabled" flag. When needed the DLL fires the event
+`what="password?"` (`int1`=buffer size, `str`=password buffer); the callback
+copies the password into `str` and returns **121 (`'y'`)**. Crypto:
+PBKDF2 (pkcs5) + AES-256/CTR, checked against the `:c` value in the method
+string. No ISDone, no window handles required.

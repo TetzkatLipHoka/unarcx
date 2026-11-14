@@ -1,0 +1,8 @@
+# build output
+*.exe
+*.dcu
+*.map
+
+# untrusted third-party scene codec binaries (unarc.dll, cls-*, srep64, ...)
+# ship the repack's own copies; do not redistribute them here
+DLL/
